@@ -1,0 +1,395 @@
+<html><head><base href="https://3d-creepy-teacher-chase.example.com/"><title>3D 恐怖追逐遊戲：逃離變態香菇頭老師</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+#game-container {
+    width: 100%;
+    height: 100%;
+}
+#score {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: #fff;
+    font-size: 20px;
+    z-index: 20;
+}
+#game-over {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ff0000;
+    font-size: 48px;
+    text-align: center;
+    z-index: 30;
+    background-color: rgba(0,0,0,0.7);
+    padding: 20px;
+    border-radius: 10px;
+}
+#instructions {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    color: #fff;
+    font-size: 16px;
+    z-index: 20;
+}
+#math-question {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    z-index: 40;
+}
+#math-question input {
+    margin-top: 10px;
+    padding: 5px;
+    width: 100px;
+}
+#math-question button {
+    margin-top: 10px;
+    padding: 5px 10px;
+}
+#teacher-speed {
+    position: absolute;
+    top: 40px;
+    left: 10px;
+    color: #fff;
+    font-size: 16px;
+    z-index: 20;
+}
+#balls-collected {
+    position: absolute;
+    top: 70px;
+    left: 10px;
+    color: #fff;
+    font-size: 16px;
+    z-index: 20;
+}
+</style>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="score">分數: <span id="score-value">0</span></div>
+<div id="teacher-speed">老師速度: <span id="speed-value">1x</span></div>
+<div id="balls-collected">收集的球: <span id="balls-value">0</span></div>
+<div id="game-over">遊戲結束！<br>變態香菇頭老師抓到你了！<br>按空格鍵重新開始</div>
+<div id="instructions">
+    方向鍵：移動<br>
+    W 鍵：加速跑<br>
+    S 鍵：攻擊老師<br>
+    綠色方塊：攻擊道具
+</div>
+<div id="math-question">
+    <p id="question-text"></p>
+    <input type="number" id="answer-input">
+    <button onclick="checkAnswer()">提交</button>
+</div>
+
+<script>
+let scene, camera, renderer, student, teacher, homework;
+let desks = [];
+let canAttack = true;
+let attackCooldown = 3000; // 3 seconds cooldown
+let score = 0;
+let gameOver = false;
+let isSolvingMath = false;
+let teacherSpeed = 0.08;
+let teacherSpeedMultiplier = 1;
+let ballsCollected = 0;
+let cooldownIndicator;
+
+const scoreElement = document.getElementById('score-value');
+const gameOverElement = document.getElementById('game-over');
+const mathQuestionElement = document.getElementById('math-question');
+const questionTextElement = document.getElementById('question-text');
+const answerInputElement = document.getElementById('answer-input');
+const speedValueElement = document.getElementById('speed-value');
+const ballsValueElement = document.getElementById('balls-value');
+
+const SCENE_SIZE = 50;
+const NORMAL_SPEED = 0.15;
+const SPRINT_SPEED = 0.3;
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1a);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 20, 20);
+    camera.lookAt(0, 0, 0);
+
+    renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('game-container').appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight.position.set(0, 20, 0);
+    scene.add(directionalLight);
+
+    const floorGeometry = new THREE.PlaneGeometry(SCENE_SIZE, SCENE_SIZE);
+    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+
+    const studentGeometry = new THREE.BoxGeometry(0.5, 1, 0.5);
+    const studentMaterial = new THREE.MeshStandardMaterial({ color: 0x4a90e2 });
+    student = new THREE.Mesh(studentGeometry, studentMaterial);
+    student.position.set(0, 0.5, 0);
+    scene.add(student);
+
+    const teacherGeometry = new THREE.ConeGeometry(0.5, 2, 32);
+    const teacherMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    teacher = new THREE.Mesh(teacherGeometry, teacherMaterial);
+    teacher.position.set(10, 1, 10);
+    scene.add(teacher);
+
+    const hairGeometry = new THREE.SphereGeometry(0.6, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+    const hairMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+    hair.position.y = 1;
+    teacher.add(hair);
+
+    const glassesGeometry = new THREE.TorusGeometry(0.2, 0.05, 16, 100);
+    const glassesMaterial = new THREE.MeshStandardMaterial({ color: 0xFFD700 });
+    const leftLens = new THREE.Mesh(glassesGeometry, glassesMaterial);
+    leftLens.position.set(-0.2, 0.7, 0.4);
+    teacher.add(leftLens);
+    const rightLens = new THREE.Mesh(glassesGeometry, glassesMaterial);
+    rightLens.position.set(0.2, 0.7, 0.4);
+    teacher.add(rightLens);
+
+    for (let i = 0; i < 20; i++) {
+        const deskGeometry = new THREE.BoxGeometry(1, 0.5, 0.8);
+        const deskMaterial = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
+        const desk = new THREE.Mesh(deskGeometry, deskMaterial);
+        desk.position.set(
+            Math.random() * (SCENE_SIZE - 2) - (SCENE_SIZE / 2 - 1),
+            0.25,
+            Math.random() * (SCENE_SIZE - 2) - (SCENE_SIZE / 2 - 1)
+        );
+        scene.add(desk);
+        desks.push(desk);
+    }
+
+    const homeworkGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+    const homeworkMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    homework = new THREE.Mesh(homeworkGeometry, homeworkMaterial);
+    placeHomework();
+    scene.add(homework);
+
+    const cooldownGeometry = new THREE.RingGeometry(0.3, 0.4, 32);
+    const cooldownMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+    cooldownIndicator = new THREE.Mesh(cooldownGeometry, cooldownMaterial);
+    cooldownIndicator.rotation.x = -Math.PI / 2;
+    cooldownIndicator.position.y = 0.01;
+    student.add(cooldownIndicator);
+}
+
+function placeHomework() {
+    homework.position.set(
+        Math.random() * (SCENE_SIZE - 2) - (SCENE_SIZE / 2 - 1),
+        0.5,
+        Math.random() * (SCENE_SIZE - 2) - (SCENE_SIZE / 2 - 1)
+    );
+}
+
+function moveStudent() {
+    if (isSolvingMath) return;
+    
+    const speed = keys.KeyW ? SPRINT_SPEED : NORMAL_SPEED;
+    if (keys.ArrowUp) student.position.z -= speed;
+    if (keys.ArrowDown) student.position.z += speed;
+    if (keys.ArrowLeft) student.position.x -= speed;
+    if (keys.ArrowRight) student.position.x += speed;
+
+    const halfSize = SCENE_SIZE / 2 - 1;
+    student.position.x = Math.max(-halfSize, Math.min(halfSize, student.position.x));
+    student.position.z = Math.max(-halfSize, Math.min(halfSize, student.position.z));
+
+    camera.position.x = student.position.x;
+    camera.position.z = student.position.z + 20;
+    camera.lookAt(student.position);
+}
+
+function moveTeacher() {
+    if (isSolvingMath) return;
+    
+    const dx = student.position.x - teacher.position.x;
+    const dz = student.position.z - teacher.position.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distance > 0.5) {
+        teacher.position.x += (dx / distance) * teacherSpeed * teacherSpeedMultiplier;
+        teacher.position.z += (dz / distance) * teacherSpeed * teacherSpeedMultiplier;
+    }
+    
+    teacher.lookAt(student.position);
+}
+
+function checkCollisions() {
+    if (isSolvingMath) return;
+
+    const distanceToTeacher = student.position.distanceTo(teacher.position);
+    if (distanceToTeacher < 1) {
+        gameOver = true;
+        gameOverElement.style.display = 'block';
+    }
+
+    const distanceToHomework = student.position.distanceTo(homework.position);
+    if (distanceToHomework < 1) {
+        showMathQuestion();
+    }
+
+    for (let desk of desks) {
+        const distanceToDesk = student.position.distanceTo(desk.position);
+        if (distanceToDesk < 1) {
+            const pushVector = student.position.clone().sub(desk.position).normalize().multiplyScalar(0.1);
+            student.position.add(pushVector);
+        }
+    }
+}
+
+function showMathQuestion() {
+    isSolvingMath = true;
+    const num1 = Math.floor(Math.random() * 10) + 1;
+    const num2 = Math.floor(Math.random() * 10) + 1;
+    const operator = Math.random() < 0.5 ? '+' : '-';
+    
+    questionTextElement.textContent = `${num1} ${operator} ${num2} = ?`;
+    mathQuestionElement.style.display = 'block';
+    answerInputElement.value = '';
+    answerInputElement.focus();
+}
+
+function attackTeacher() {
+    if (canAttack) {
+        const pushVector = teacher.position.clone().sub(student.position).normalize().multiplyScalar(-5);
+        teacher.position.add(pushVector);
+        canAttack = false;
+        cooldownIndicator.material.color.setHex(0xff0000);
+        setTimeout(() => {
+            canAttack = true;
+            cooldownIndicator.material.color.setHex(0x00ff00);
+        }, attackCooldown);
+    }
+}
+
+function checkAnswer() {
+    const userAnswer = parseInt(answerInputElement.value);
+    const [num1, operator, num2] = questionTextElement.textContent.split(' ');
+    const correctAnswer = operator === '+' ? parseInt(num1) + parseInt(num2) : parseInt(num1) - parseInt(num2);
+
+    if (userAnswer === correctAnswer) {
+        mathQuestionElement.style.display = 'none';
+        isSolvingMath = false;
+        score += 10;
+        scoreElement.textContent = score;
+        ballsCollected++;
+        ballsValueElement.textContent = ballsCollected;
+        teacherSpeedMultiplier += 0.05;
+        speedValueElement.textContent = teacherSpeedMultiplier.toFixed(2) + 'x';
+        placeHomework();
+    } else {
+        alert('答錯了，請重試！');
+        mathQuestionElement.style.display = 'none';
+        isSolvingMath = false;
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    if (!gameOver && !isSolvingMath) {
+        moveStudent();
+        moveTeacher();
+        checkCollisions();
+        score++;
+        scoreElement.textContent = score;
+    }
+
+    renderer.render(scene, camera);
+}
+
+const keys = {
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false,
+    KeyW: false,
+    KeyS: false
+};
+
+document.addEventListener('keydown', (e) => {
+    if (gameOver) {
+        if (e.code === 'Space') {
+            resetGame();
+        }
+        return;
+    }
+    
+    if (e.code in keys) {
+        keys[e.code] = true;
+    }
+    
+    if (e.code === 'KeyS') {
+        attackTeacher();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (e.code in keys) {
+        keys[e.code] = false;
+    }
+});
+
+function resetGame() {
+    student.position.set(0, 0.5, 0);
+    teacher.position.set(10, 1, 10);
+    score = 0;
+    gameOver = false;
+    isSolvingMath = false;
+    teacherSpeedMultiplier = 1;
+    ballsCollected = 0;
+    gameOverElement.style.display = 'none';
+    mathQuestionElement.style.display = 'none';
+    scoreElement.textContent = '0';
+    speedValueElement.textContent = '1x';
+    ballsValueElement.textContent = '0';
+
+    canAttack = true;
+    cooldownIndicator.material.color.setHex(0x00ff00);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+window.addEventListener('resize', onWindowResize, false);
+
+init();
+animate();
+</script>
+</body></html>
